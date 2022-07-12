@@ -117,10 +117,10 @@ def main():
     h = 1
     b = 10.0
     c = 10.0
-    time_step = 0.001
-    num_steps = 500
+    time_step = 0.001# delta_t
+    num_steps = 5000# integration_steps
     F = 30.0
-    X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, 20, 10)
+    X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, 0, 100)
 
     print(X_out.max(), X_out.min())
     plt.figure(figsize=(8, 10))
@@ -163,6 +163,21 @@ def main():
     plt.xlabel("Time (MTU)")
     plt.ylabel("Y Values")
     plt.show()
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(times, Y_out[:, 0], label="Y (0)")
+    plt.plot(times, Y_out[:, 32], label="Y (32)")
+    plt.plot(times, Y_out[:, 64], label="Y (64)")
+    plt.plot(times, Y_out[:, 96], label="Y (96)")
+    plt.plot(times, Y_out[:, 128], label="Y (128)")
+    plt.plot(times, Y_out[:, 160], label="Y (160)")
+    plt.plot(times, Y_out[:, 192], label="Y (192)")
+    plt.plot(times, Y_out[:, 224], label="Y (224)")
+    plt.legend(loc=0)
+    plt.xlabel("Time (MTU)")
+    plt.ylabel("Y Values")
+    plt.show()
+
 
     return X_out, Y_out, times
 
