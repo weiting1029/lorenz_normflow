@@ -150,9 +150,27 @@ def main():
     plt.ylabel("X Values")
     plt.show()
 
+    plt.figure(figsize=(10, 5))
+    plt.plot(times, Y_out[:, 0], label="Y (0)")
+    plt.plot(times, Y_out[:, 1], label="Y (1)")
+    plt.plot(times, Y_out[:, 2], label="Y (2)")
+    plt.plot(times, Y_out[:, 3], label="Y (3)")
+    plt.plot(times, Y_out[:, 4], label="Y (4)")
+    plt.plot(times, Y_out[:, 5], label="Y (5)")
+    plt.plot(times, Y_out[:, 6], label="Y (6)")
+    plt.plot(times, Y_out[:, 7], label="Y (7)")
+    plt.legend(loc=0)
+    plt.xlabel("Time (MTU)")
+    plt.ylabel("Y Values")
+    plt.show()
+
     return X_out, Y_out, times
 
 
 if __name__ == "__main__":
     X_out, Y_out, times = main()
+
+
+
+
 
