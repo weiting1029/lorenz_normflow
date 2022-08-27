@@ -3,6 +3,8 @@ from numba import jit
 import matplotlib.pyplot as plt
 import xarray as xr
 import pandas as pd
+import scipy
+from scipy import stats
 from scipy.integrate import solve_ivp
 
 
@@ -106,6 +108,41 @@ def run_lorenz96_truth(x_initial, y_initial, h, f, b, c, time_step, num_steps, b
             y_trap[:] += y
     return x_out, y_out, times, steps
 
+
+def gnr_synthetic_data(X_out, Y_out, times, N, J, K):
+    T = X_out.shape[0]
+    Y_bar = np.zeros(X_out.shape)
+    for i in range(K):
+        start_index = i * J
+        end_index = (i + 1) * J - 1
+        Y_bar[:, i] = np.mean(Y_out[:, start_index:end_index], axis=1)
+    big_array = np.concatenate((np.reshape(times, (T, 1)), X_out, Y_bar), axis=1)
+
+    df = pd.DataFrame(big_array)
+    df = df.groupby(np.arange(len(df)) // 100).mean()
+
+    traject_array = np.array(df)
+    synthetic_array = np.zeros([30, 5])
+    synthetic_array[:, 0] = np.mean(traject_array[:, 1:9], axis=1)
+    synthetic_array[:, 1] = np.mean(traject_array[:, 9:17], axis=1)
+    synthetic_array[:, 2] = np.square(np.mean(traject_array[:, 1:9], axis=1))
+    synthetic_array[:, 3] = np.multiply(np.mean(traject_array[:, 1:9], axis=1),
+                                        np.mean(traject_array[:, 9:17], axis=1))
+    synthetic_array[:, 4] = np.square(np.mean(traject_array[:, 9:17], axis=1))
+
+    s_p = np.std(synthetic_array, axis=0)
+    sigma_p = 1.5 * s_p
+    mean = np.zeros(5)
+    cov = np.diag(sigma_p ** 2)
+    measurement_noise = np.random.multivariate_normal(mean, cov, 30)
+    noisy_synth = synthetic_array + measurement_noise
+
+    synthetic_data = pd.DataFrame(synthetic_array, columns=['X', 'Y_bar', 'X^2', 'X*Y_bar', 'Y_bar^2'])
+    noisy_synthetic_data = pd.DataFrame(noisy_synth, columns=['X', 'Y_bar', 'X^2', 'X*Y_bar', 'Y_bar^2'])
+
+    return synthetic_data, noisy_synthetic_data
+
+
 def process_lorenz_data(X_out, times, steps, J, F, dt, x_skip, t_skip, u_scale):
     """
     Sample from Lorenz model output and reformat the data into a format more amenable to machine learning.
@@ -121,8 +158,8 @@ def process_lorenz_data(X_out, times, steps, J, F, dt, x_skip, t_skip, u_scale):
         combined_data: pandas DataFrame
     """
     x_series_list = []
-    #y_series_list = []
-    #y_prev_list = []
+    # y_series_list = []
+    # y_prev_list = []
     ux_series_list = []
     ux_prev_series_list = []
     u_series_list = []
@@ -140,17 +177,17 @@ def process_lorenz_data(X_out, times, steps, J, F, dt, x_skip, t_skip, u_scale):
                               (X_out[t_s + 1, k] - X_out[t_s, k]) / dt)
         ux_prev_series_list.append((-X_out[t_p, k - 1] * (X_out[t_p, k - 2] - X_out[t_p, (k + 1) % K]) - X_out[t_p, k]
                                     + F) - (X_out[t_s, k] - X_out[t_p, k]) / dt)
-        #y_series_list.append(Y_out[t_s, k * J: (k + 1) * J])
-        #y_prev_list.append(Y_out[t_p, k * J: (k + 1) * J])
-        #u_series_list.append(np.expand_dims(u_scale * Y_out[t_s, k * J: (k+1) * J].sum(axis=1), 1))
-        #u_prev_series_list.append(np.expand_dims(u_scale * Y_out[t_p, k * J: (k+1) * J].sum(axis=1), 1))
+        # y_series_list.append(Y_out[t_s, k * J: (k + 1) * J])
+        # y_prev_list.append(Y_out[t_p, k * J: (k + 1) * J])
+        # u_series_list.append(np.expand_dims(u_scale * Y_out[t_s, k * J: (k+1) * J].sum(axis=1), 1))
+        # u_prev_series_list.append(np.expand_dims(u_scale * Y_out[t_p, k * J: (k+1) * J].sum(axis=1), 1))
         time_list.append(times[t_s])
         step_list.append(steps[t_s])
         x_list.append(np.ones(time_list[-1].size) * k)
     x_cols = ["X_t"]
-    #y_cols = ["Y_t+1_{0:d}".format(y) for y in range(J)]
-    #y_p_cols = ["Y_t_{0:d}".format(y) for y in range(J)]
-    #u_cols = ["Uy_t", "Uy_t+1", "Ux_t", "Ux_t+1"]
+    # y_cols = ["Y_t+1_{0:d}".format(y) for y in range(J)]
+    # y_p_cols = ["Y_t_{0:d}".format(y) for y in range(J)]
+    # u_cols = ["Uy_t", "Uy_t+1", "Ux_t", "Ux_t+1"]
     u_cols = ["Ux_t", "Ux_t+1"]
     combined_data = pd.DataFrame(np.vstack(x_series_list), columns=x_cols)
     combined_data.loc[:, "time"] = np.concatenate(time_list)
@@ -159,11 +196,11 @@ def process_lorenz_data(X_out, times, steps, J, F, dt, x_skip, t_skip, u_scale):
     combined_data.loc[:, "u_scale"] = u_scale
     combined_data.loc[:, "Ux_t+1"] = np.concatenate(ux_series_list)
     combined_data.loc[:, "Ux_t"] = np.concatenate(ux_prev_series_list)
-    #combined_data.loc[:, "Uy_t+1"] = np.concatenate(u_series_list)
-    #combined_data.loc[:, "Uy_t"] = np.concatenate(u_prev_series_list)
-    #combined_data = pd.concat([combined_data, pd.DataFrame(np.vstack(y_prev_list), columns=y_p_cols),
+    # combined_data.loc[:, "Uy_t+1"] = np.concatenate(u_series_list)
+    # combined_data.loc[:, "Uy_t"] = np.concatenate(u_prev_series_list)
+    # combined_data = pd.concat([combined_data, pd.DataFrame(np.vstack(y_prev_list), columns=y_p_cols),
     #                           pd.DataFrame(np.vstack(y_series_list), columns=y_cols)], axis=1)
-    out_cols = ["x_index", "step", "time", "u_scale"] + x_cols + u_cols # + y_p_cols + y_cols
+    out_cols = ["x_index", "step", "time", "u_scale"] + x_cols + u_cols  # + y_p_cols + y_cols
     return combined_data.loc[:, out_cols]
 
 
@@ -194,13 +231,9 @@ def save_lorenz_output(X_out, Y_out, times, steps, model_attrs, out_file):
                                          dims=["time", "y"], name="lorenz_Y", attrs={"long_name": "lorenz_y",
                                                                                      "units": ""})
     l_ds = xr.Dataset(data_vars=data_vars, attrs=model_attrs)
-    l_ds.to_netcdf(out_file, "w", encoding={"lorenz_x" : {"zlib": True, "complevel": 2},
+    l_ds.to_netcdf(out_file, "w", encoding={"lorenz_x": {"zlib": True, "complevel": 2},
                                             "lorenz_y": {"zlib": True, "complevel": 2}})
     return
-
-
-
-
 
 
 def main():
@@ -213,18 +246,23 @@ def main():
     h = 1
     b = 10.0
     c = 10.0
+    F = 10.0
+
+    T = 100
     time_step = 0.001  # delta_t
-    num_steps = 2000000  # integration_steps
-    F = 30.0
+    num_steps = 3600000  # integration_steps 3600/0.001
+    burn_in = 600000  # 600/0.001
+    skip = 1000  # 1/0.001
 
+    num_steps_test = 36000  # integration_steps 3600/0.001
+    burn_in_test = 6000  # 600/0.001
+    skip_test = 1000  # 1/0.001
 
+    N = (num_steps - burn_in) / (skip * T)
 
-    X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, burn_in=2000, skip=5)
-    data_out = process_lorenz_data(X_out, times, steps, J, F, dt = time_step, x_skip=1, t_skip=10, u_scale=1)
-
-
-
-
+    X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, burn_in, skip)
+    # data_out = process_lorenz_data(X_out, times, steps, J, F, dt=time_step, x_skip=1, t_skip=10, u_scale=1)
+    synth_data, noisy_synth_data = gnr_synthetic_data(X_out, Y_out, times, N, J, K)
 
     # print(X_out.max(), X_out.min())
     # plt.figure(figsize=(8, 10))
@@ -240,6 +278,7 @@ def main():
     # plt.colorbar()
     # plt.show()
     #
+
     # plt.figure(figsize=(10, 5))
     # plt.plot(times, X_out[:, 0], label="X (0)")
     # plt.plot(times, X_out[:, 1], label="X (1)")
@@ -268,8 +307,54 @@ def main():
     # plt.ylabel("Y Values")
     # plt.show()
     #
+
+    # return X_out, Y_out, times
+    # return data_out
+    return  synth_data, noisy_synth_data
+
+
+if __name__ == "__main__":
+    synth_data, noisy_synth_data = main()
+    # X_out, Y_out, times = main()
+
+
+
+
+
+
+    # data_out = mean()
+    # data.to_csv('test.csv')
+    # vec_average = np.array(time_average)
+    # mtu_times = np.arange(30) + 1
     # plt.figure(figsize=(10, 5))
-    # plt.plot(times, Y_out[:, 0], label="Y (0)")
+    # plt.plot(mtu_times, vec_average[:, 1], label="X (1)")
+    # plt.plot(mtu_times, vec_average[:, 2], label="X (2)")
+    # plt.plot(mtu_times, vec_average[:, 3], label="X (3)")
+    # plt.plot(mtu_times, vec_average[:, 4], label="X (4)")
+    # plt.plot(mtu_times, vec_average[:, 5], label="X (5)")
+    # plt.plot(mtu_times, vec_average[:, 6], label="X (6)")
+    # plt.plot(mtu_times, vec_average[:, 7], label="X (7)")
+    # plt.plot(mtu_times, vec_average[:, 8], label="X (8)")
+    # plt.legend(loc=0)
+    # plt.xlabel("i-th intervals")
+    # plt.ylabel("X_k Values")
+    # plt.show()
+
+    # vec_average = np.array(time_average)
+    # mtu_times = vec_average[:, 0]
+    # plt.figure(figsize=(10, 5))
+    # plt.plot(mtu_times, vec_average[:, 9], label="Y (1)")
+    # plt.plot(mtu_times, vec_average[:, 10], label="Y (2)")
+    # plt.plot(mtu_times, vec_average[:, 11], label="Y (3)")
+    # plt.plot(mtu_times, vec_average[:, 12], label="Y (4)")
+    # plt.plot(mtu_times, vec_average[:, 13], label="Y (5)")
+    # plt.plot(mtu_times, vec_average[:, 14], label="Y (6)")
+    # plt.plot(mtu_times, vec_average[:, 15], label="Y (7)")
+    # plt.plot(mtu_times, vec_average[:, 16], label="Y (8)")
+    # plt.legend(loc=0)
+    # plt.xlabel("i-th intervals")
+    # plt.ylabel("Average Y_k Values")
+    # plt.show()
     # plt.plot(times, Y_out[:, 32], label="Y (32)")
     # plt.plot(times, Y_out[:, 64], label="Y (64)")
     # plt.plot(times, Y_out[:, 96], label="Y (96)")
@@ -277,15 +362,16 @@ def main():
     # plt.plot(times, Y_out[:, 160], label="Y (160)")
     # plt.plot(times, Y_out[:, 192], label="Y (192)")
     # plt.plot(times, Y_out[:, 224], label="Y (224)")
+
+    # vec_synth = np.array(synth_data)
+    # mtu_times = np.arange(30) + 1
+    # plt.figure(figsize=(10, 5))
+    # plt.plot(mtu_times, vec_synth[:, 0], label="X (1)")
+    # # plt.plot(mtu_times, vec_synth[:, 1], label="X (1)")
+    # # plt.plot(mtu_times, vec_synth[:, 2], label="X (1)")
+    # # plt.plot(mtu_times, vec_synth[:, 3], label="X (1)")
+    # # plt.plot(mtu_times, vec_synth[:, 4], label="X (1)")
     # plt.legend(loc=0)
-    # plt.xlabel("Time (MTU)")
-    # plt.ylabel("Y Values")
+    # plt.xlabel("i-th intervals")
+    # plt.ylabel("X_k Values")
     # plt.show()
-
-    # return X_out, Y_out, times
-    return data_out
-
-if __name__ == "__main__":
-    data = main()
-    data.to_csv('test.csv')
-
