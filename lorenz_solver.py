@@ -112,11 +112,14 @@ def run_lorenz96_truth(x_initial, y_initial, h, f, b, c, time_step, num_steps, b
 def gnr_synthetic_data(X_out, Y_out, times, N, J, K):
     T = X_out.shape[0]
     Y_bar = np.zeros(X_out.shape)
+    Y_square = np.square(Y_out)
+    Y_square_bar = np.zeros(X_out.shape)
     for i in range(K):
         start_index = i * J
         end_index = (i + 1) * J - 1
         Y_bar[:, i] = np.mean(Y_out[:, start_index:end_index], axis=1)
-    big_array = np.concatenate((np.reshape(times, (T, 1)), X_out, Y_bar), axis=1)
+        Y_square_bar[:, i] = np.mean(Y_square[:, start_index:end_index], axis=1)
+    big_array = np.concatenate((np.reshape(times, (T, 1)), X_out, Y_bar, Y_square_bar), axis=1)
 
     df = pd.DataFrame(big_array)
     df = df.groupby(np.arange(len(df)) // 100).mean()
@@ -128,7 +131,7 @@ def gnr_synthetic_data(X_out, Y_out, times, N, J, K):
     synthetic_array[:, 2] = np.square(np.mean(traject_array[:, 1:9], axis=1))
     synthetic_array[:, 3] = np.multiply(np.mean(traject_array[:, 1:9], axis=1),
                                         np.mean(traject_array[:, 9:17], axis=1))
-    synthetic_array[:, 4] = np.square(np.mean(traject_array[:, 9:17], axis=1))
+    synthetic_array[:, 4] = np.mean(traject_array[:, 17:25], axis=1)
 
     s_p = np.std(synthetic_array, axis=0)
     sigma_p = 1.5 * s_p
@@ -261,6 +264,7 @@ def main():
     N = (num_steps - burn_in) / (skip * T)
 
     X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, burn_in, skip)
+
     # data_out = process_lorenz_data(X_out, times, steps, J, F, dt=time_step, x_skip=1, t_skip=10, u_scale=1)
     synth_data, noisy_synth_data = gnr_synthetic_data(X_out, Y_out, times, N, J, K)
 
@@ -363,15 +367,22 @@ if __name__ == "__main__":
     # plt.plot(times, Y_out[:, 192], label="Y (192)")
     # plt.plot(times, Y_out[:, 224], label="Y (224)")
 
-    # vec_synth = np.array(synth_data)
-    # mtu_times = np.arange(30) + 1
-    # plt.figure(figsize=(10, 5))
-    # plt.plot(mtu_times, vec_synth[:, 0], label="X (1)")
-    # # plt.plot(mtu_times, vec_synth[:, 1], label="X (1)")
-    # # plt.plot(mtu_times, vec_synth[:, 2], label="X (1)")
-    # # plt.plot(mtu_times, vec_synth[:, 3], label="X (1)")
-    # # plt.plot(mtu_times, vec_synth[:, 4], label="X (1)")
-    # plt.legend(loc=0)
-    # plt.xlabel("i-th intervals")
-    # plt.ylabel("X_k Values")
+    vec_synth = np.array(noisy_synth_data)
+    mtu_times = np.arange(30) + 1
+    plt.figure(figsize=(5, 5))
+    plt.plot(mtu_times, vec_synth[:, 0], label="X (1)")
+    # plt.plot(mtu_times, vec_synth[:, 1], label="X (1)")
+    # plt.plot(mtu_times, vec_synth[:, 2], label="X (1)")
+    # plt.plot(mtu_times, vec_synth[:, 3], label="X (1)")
+    # plt.plot(mtu_times, vec_synth[:, 4], label="X (1)")
+    plt.legend(loc=0)
+    plt.xlabel("i-th intervals")
+    plt.ylabel("X_k Values")
+    plt.show()
+
+    #
+    # plt.hist(noisy_synth_data['X'], bins=25, density=True, alpha=0.6, color='g')
     # plt.show()
+
+    plt.figure(figsize=(5, 10))
+
