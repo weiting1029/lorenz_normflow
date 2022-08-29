@@ -208,6 +208,7 @@ def eks_fixed_initial(data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, tim
     p = m_theta.shape[0]
     theta_0 = prior_theta(m_theta, sigma_theta, J)
     weight_matrix = linalg.inv(linalg.sqrtm(SIGMA))  ##W = SIGMA^(-1/2)
+    data_matrix = np.repeat(data.to_numpy()[None, :], J, axis=0).reshape(-1, 5)
     # theta_prev =
     theta_new = theta_0
     for i in range(max_itr):
@@ -233,7 +234,6 @@ def eks_fixed_initial(data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, tim
 
         forward_mean = np.mean(forward_eva, axis=0) * np.ones(forward_eva.shape)  ##?
         CTHETA = CTHETA / J
-        data_matrix = np.repeat(data, J, axis=0)
 
         g_demeaned = np.matmul(forward_eva - forward_mean, weight_matrix.T)  # dim: 30J x  5
         data_dm = np.matmul(forward_eva - data_matrix, weight_matrix.T)  # dim: 30J x 5
@@ -283,10 +283,10 @@ def main():
     rng = np.random.default_rng(12345)
 
     T = 100
-    time_step = 0.001  # delta_t
-    num_steps = 3600000  # integration_steps 3600/0.001
-    burn_in = 600000  # 600/0.001
-    skip = 1000  # 1/0.001
+    time_step = 0.01  # delta_t
+    num_steps = 360000  # integration_steps 3600/0.001
+    burn_in = 60000  # 600/0.001
+    skip = 100  # 1/0.001
 
     num_steps_test = 36000  # integration_steps 3600/0.001
     burn_in_test = 6000  # 600/0.001
@@ -294,10 +294,10 @@ def main():
 
     N = (num_steps - burn_in) / (skip * T)
 
-    # X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, burn_in, skip)
-    X_out = np.array(pd.read_csv('data/X_out.csv'))[:, 1:]
-    Y_out = np.array(pd.read_csv('data/Y_out.csv'))[:, 1:]
-    times = np.arange(3000)
+    X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, burn_in, skip)
+    # X_out = np.array(pd.read_csv('data/X_out.csv'))[:, 1:]
+    # Y_out = np.array(pd.read_csv('data/Y_out.csv'))[:, 1:]
+    # times = np.arange(3000)
     # data_out = process_lorenz_data(X_out, times, steps, J, F, dt=time_step, x_skip=1, t_skip=10, u_scale=1)
 
     synth_data, noisy_synth_data = gnr_synthetic_data(X_out, Y_out, times, N, L, K)
@@ -314,6 +314,8 @@ def main():
     theta_test = eks_fixed_initial(noisy_synth_data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, time_step,
                                    num_steps,
                                    burn_in, skip)
+
+    # theta_test = 0
 
     return synth_data, noisy_synth_data, theta_test
 
