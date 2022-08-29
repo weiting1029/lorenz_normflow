@@ -145,7 +145,8 @@ def gnr_synthetic_data(X_out, Y_out, times, N, L, K):
     synthetic_array[:, 4] = np.mean(traject_array[:, 17:25], axis=1)
 
     s_p = np.std(synthetic_array, axis=0)
-    sigma_p = 1.5 * s_p
+    sigma_p = 50 * s_p
+    # sigma_p = 0.1*np.ones(5)
     mean = np.zeros(5)
     cov = np.diag(sigma_p ** 2)
     measurement_noise = rng.multivariate_normal(mean, cov, 30)
@@ -211,16 +212,16 @@ def eks_fixed_initial(data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, tim
     data_matrix = np.repeat(data.to_numpy()[None, :], J, axis=0).reshape(-1, 5)
     # theta_prev =
     theta_new = theta_0
+    THETA = np.zeros([max_itr*J, p])
     for i in range(max_itr):
         theta_prev = theta_new  # dim: (J, 4)
+        THETA[i*J:(i+1)*J, :] = theta_new
         theta_mean = np.mean(theta_prev, axis=0)
         theta_dm = theta_prev - theta_mean * np.ones(theta_prev.shape)
         CTHETA = np.zeros([p, p])
-        inner = 0
         forward_eva = np.zeros([30 * J, 5])
         for j in range(J):
             CTHETA = CTHETA + np.outer(theta_dm[j, :], theta_dm[j, :])  # dim:(p,p)
-
             h_j = theta_prev[j, 0]
             F_j = theta_prev[j, 1]
             c_j = np.exp(theta_prev[j, 2])
@@ -237,23 +238,27 @@ def eks_fixed_initial(data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, tim
 
         g_demeaned = np.matmul(forward_eva - forward_mean, weight_matrix.T)  # dim: 30J x  5
         data_dm = np.matmul(forward_eva - data_matrix, weight_matrix.T)  # dim: 30J x 5
+        # norm = np.mean(np.multiply(forward_eva - forward_mean, forward_eva - data_matrix))
+        # delta_t = 1/(norm+eps)
+        #
         norm = np.mean(np.multiply(g_demeaned, data_dm))
         delta_t = 1 / (norm + eps)
 
         for j in range(J):
             start_index = j * 30
-            end_index = (j + 1) * 30 - 1
-            temp_matrix = np.repeat(data_dm[start_index:end_index, :], J, axis=0)
+            end_index = (j + 1) * 30
+            temp_matrix = np.repeat(data_dm[start_index:end_index, :][None ,:], J, axis=0).reshape(-1, 5)
             dot_product = np.sum(np.multiply(g_demeaned, temp_matrix), axis=1)  # (30J,1)
-            vec_product = np.mean(dot_product.reshape(-1, 30), axis=1)  # (J,1)
+            vec_product = np.mean(dot_product.reshape(-1, 30), axis=1).reshape(J, 1)  # (J,1)
 
-            theta_weighted = np.mean(np.multiply(theta_prev, np.repeat(vec_product, p, axis=1)))  # dim: (p,1)
+            theta_weighted = np.mean(np.multiply(theta_prev, np.repeat(vec_product, p, axis=1)),axis=0)  # dim: (p,1)
 
             v = theta_prev[j] - delta_t * theta_weighted
             A = delta_t * np.matmul(CTHETA, linalg.inv(sigma_theta)) + np.identity(p)  # dim: (p,p)
             theta_new[j] = linalg.solve(A, v)
+            # print(theta_new[j])
 
-    return theta_new
+    return THETA
 
     # norm = np.mean(np.multiply(g_demeaned, temp_matrix))
 
@@ -302,15 +307,15 @@ def main():
 
     synth_data, noisy_synth_data = gnr_synthetic_data(X_out, Y_out, times, N, L, K)
 
-    ### EKS
+    ######## EKS
     x0 = 1
     y0 = 0.1
     m_theta = np.array([0, 10, 2, 5])
     sigma_theta = np.diag([1, 10, 0.1, 10])
     SIGMA = np.asarray(noisy_synth_data.cov())
-    max_itr = 100
-    J = 30
-
+    max_itr = 5
+    J = 5
+    #
     theta_test = eks_fixed_initial(noisy_synth_data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, time_step,
                                    num_steps,
                                    burn_in, skip)
@@ -323,3 +328,4 @@ def main():
 if __name__ == "__main__":
     synth_data, noisy_synth_data, theta_test = main()
     print(synth_data.describe())
+    print(np.mean(theta_test, axis=0))
