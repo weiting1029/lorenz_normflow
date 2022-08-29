@@ -204,6 +204,7 @@ def prior_initial(m_z0, sigma_z0, J):
 
 
 def eks_fixed_initial(data, N, J, x0, y0, m_theta, sigma_theta, SIGMA, time_step, num_steps, burn_in, skip):
+    eps = np.finfo(float).eps
     p = m_theta.shape[0]
     theta_0 = prior_theta(m_theta, sigma_theta, J)
     weight_matrix = linalg.inv(linalg.sqrtm(SIGMA))  ##W = SIGMA^(-1/2)
@@ -236,7 +237,8 @@ def eks_fixed_initial(data, N, J, x0, y0, m_theta, sigma_theta, SIGMA, time_step
 
         g_demeaned = np.matmul(forward_eva - forward_mean, weight_matrix.T)  # dim: 30J x  5
         data_dm = np.matmul(forward_eva - data_matrix, weight_matrix.T)  # dim: 30J x 5
-        delta_t = 1
+        norm = np.mean(np.multiply(g_demeaned,data_dm))
+        delta_t = 1/(norm + eps)
 
         for j in range(J):
             start_index = j * 30
