@@ -6,6 +6,8 @@ import pandas as pd
 import scipy
 from scipy import stats
 from scipy.integrate import solve_ivp
+from scipy import linalg
+from numpy.random import multivariate_normal
 
 
 @jit(nopython=True, cache=True)
@@ -110,6 +112,15 @@ def run_lorenz96_truth(x_initial, y_initial, h, f, b, c, time_step, num_steps, b
 
 
 def gnr_synthetic_data(X_out, Y_out, times, N, J, K):
+    """
+    :param X_out: trajectories of large-scale variables X_k
+    :param Y_out: trajectories of small-scale variables Y_l,k
+    :param times: in MTU times
+    :param N: number of realizations
+    :param J: number of fast variables
+    :param K: number of slow variables
+    :return: synthetic noisy data for inversions
+    """
     T = X_out.shape[0]
     Y_bar = np.zeros(X_out.shape)
     Y_square = np.square(Y_out)
@@ -137,13 +148,124 @@ def gnr_synthetic_data(X_out, Y_out, times, N, J, K):
     sigma_p = 1.5 * s_p
     mean = np.zeros(5)
     cov = np.diag(sigma_p ** 2)
-    measurement_noise = np.random.multivariate_normal(mean, cov, 30)
+    measurement_noise = multivariate_normal(mean, cov, 30)
     noisy_synth = synthetic_array + measurement_noise
 
     synthetic_data = pd.DataFrame(synthetic_array, columns=['X', 'Y_bar', 'X^2', 'X*Y_bar', 'Y_bar^2'])
     noisy_synthetic_data = pd.DataFrame(noisy_synth, columns=['X', 'Y_bar', 'X^2', 'X*Y_bar', 'Y_bar^2'])
 
     return synthetic_data, noisy_synthetic_data
+
+
+def forward_model_fi(x0, y0, h, F, b, c, time_step, num_steps, burn_in, skip):
+    K = 8
+    L = 32
+    X = np.zeros(K)
+    Y = np.zeros(L * K)
+    X[0] = x0
+    Y[0] = y0
+
+    X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, burn_in, skip)
+
+    T = X_out.shape[0]
+    Y_bar = np.zeros(X_out.shape)
+    Y_square = np.square(Y_out)
+    Y_square_bar = np.zeros(X_out.shape)
+    for i in range(K):
+        start_index = i * L
+        end_index = (i + 1) * L - 1
+        Y_bar[:, i] = np.mean(Y_out[:, start_index:end_index], axis=1)
+        Y_square_bar[:, i] = np.mean(Y_square[:, start_index:end_index], axis=1)
+    big_array = np.concatenate((np.reshape(times, (T, 1)), X_out, Y_bar, Y_square_bar), axis=1)
+
+    df = pd.DataFrame(big_array)
+    df = df.groupby(np.arange(len(df)) // 100).mean()
+
+    traject_array = np.array(df)
+    synthetic_array = np.zeros([30, 5])
+    synthetic_array[:, 0] = np.mean(traject_array[:, 1:9], axis=1)
+    synthetic_array[:, 1] = np.mean(traject_array[:, 9:17], axis=1)
+    synthetic_array[:, 2] = np.square(np.mean(traject_array[:, 1:9], axis=1))
+    synthetic_array[:, 3] = np.multiply(np.mean(traject_array[:, 1:9], axis=1),
+                                        np.mean(traject_array[:, 9:17], axis=1))
+    synthetic_array[:, 4] = np.mean(traject_array[:, 17:25], axis=1)
+
+    return synthetic_array
+
+
+def prior_theta(m_theta, sigma_theta, J):
+    theta_0 = multivariate_normal(m_theta, sigma_theta, J)
+    return theta_0
+
+
+def prior_initial(m_z0, sigma_z0, J):
+    z0 = multivariate_normal(m_z0, sigma_z0, J)
+    return z0
+
+
+def eks_fixed_initial(data, N, J, x0, y0, m_theta, sigma_theta, SIGMA, time_step, num_steps, burn_in, skip):
+    p = m_theta.shape[0]
+    theta_0 = prior_theta(m_theta, sigma_theta, J)
+    weight_matrix = linalg.inv(linalg.sqrtm(SIGMA))  ##W = SIGMA^(-1/2)
+    # theta_prev =
+    theta_new = theta_0
+    for i in range(N):
+        theta_prev = theta_new #dim: (J, 4)
+        theta_mean = np.mean(theta_prev, axis=0)
+        theta_dm = theta_prev - theta_mean * np.ones(theta_prev.shape)
+        CTHETA = np.zeros([p, p])
+        inner = 0
+        forward_eva = np.zeros([30 * J, 5])
+        for j in range(J):
+            CTHETA = CTHETA + np.outer(theta_dm[j, :], theta_dm[j, :]) #dim:(p,p)
+
+            h_j = theta_prev[j, 0]
+            F_j = theta_prev[j, 1]
+            c_j = np.exp(theta_prev[j, 2])
+            b_j = theta_prev[j, 3]
+            start_index = j * 30
+            end_index = (j + 1) * 30 - 1
+            forward_eva[start_index:end_index, :] = forward_model_fi(x0, y0, h_j, F_j, b_j, c_j, time_step, num_steps,
+                                                                     burn_in, skip)
+
+            # distance_j = data - forward_eva[start_index:end_index, :]
+
+        forward_mean = np.mean(forward_eva, axis=0) * np.ones(forward_eva.shape)  ##?
+        CTHETA = CTHETA / J
+        data_matrix = np.repeat(data, J, axis=0)
+
+        g_demeaned = np.matmul(forward_eva - forward_mean, weight_matrix.T)  # dim: 30J x  5
+        data_dm = np.matmul(forward_eva - data_matrix, weight_matrix.T)  # dim: 30J x 5
+        delta_t = 1
+
+        for j in range(J):
+            start_index = j * 30
+            end_index = (j + 1) * 30 - 1
+            temp_matrix = np.repeat(data_dm[start_index:end_index, :], J, axis=0)
+            dot_product = np.sum(np.multiply(g_demeaned, temp_matrix), axis=1) # (30J,1)
+            vec_product = np.mean(dot_product.reshape(-1, 30), axis=1) #(J,1)
+
+            theta_weighted = np.mean(np.multiply(theta_prev, np.repeat(vec_product, p, axis=1))) #dim: (p,1)
+
+            v = theta_prev[j] - delta_t*theta_weighted
+            A = delta_t * np.matmul(CTHETA, linalg.inv(sigma_theta)) + np.identity(p) #dim: (p,p)
+            theta_new[j] = linalg.solve(A, v)
+
+    return theta_new
+
+
+
+
+            # norm = np.mean(np.multiply(g_demeaned, temp_matrix))
+
+            # theta_new[j] = np.inner( , data_dm[start_index:end_index,:])
+
+
+# def eks_unknown_initial(N, J, m_theta, sigma_theta, m_z0, sigma_z0):
+#     theta_0 = prior_theta(m_theta, sigma_theta, J)
+#     z_0 = prior_initial(m_z0, sigma_z0, J)
+#     for i in range(N):
+#
 
 
 def process_lorenz_data(X_out, times, steps, J, F, dt, x_skip, t_skip, u_scale):
@@ -245,7 +367,7 @@ def main():
     X = np.zeros(K)
     Y = np.zeros(J * K)
     X[0] = 1
-    Y[0] = 1
+    Y[0] = 0.1
     h = 1
     b = 10.0
     c = 10.0
@@ -264,125 +386,15 @@ def main():
     N = (num_steps - burn_in) / (skip * T)
 
     X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, burn_in, skip)
-
+    # X_out = np.array(pd.read_csv('data/X_out.csv'))
+    # Y_out = np.array(pd.read_csv('data/Y_out.csv'))
+    # times = np.arange(3000)
     # data_out = process_lorenz_data(X_out, times, steps, J, F, dt=time_step, x_skip=1, t_skip=10, u_scale=1)
+
     synth_data, noisy_synth_data = gnr_synthetic_data(X_out, Y_out, times, N, J, K)
 
-    # print(X_out.max(), X_out.min())
-    # plt.figure(figsize=(8, 10))
-    # plt.pcolormesh(np.arange(K), times, X_out, cmap="RdBu_r")
-    # plt.title("Lorenz '96 X Truth")
-    # plt.colorbar()
-    # plt.show()
-    #
-    # plt.figure(figsize=(8, 10))
-    # plt.pcolormesh(np.arange(J * K), times, Y_out, cmap="RdBu_r")
-    # plt.xticks(np.arange(0, J * K, J))
-    # plt.title("Lorenz '96 Y Truth")
-    # plt.colorbar()
-    # plt.show()
-    #
-
-    # plt.figure(figsize=(10, 5))
-    # plt.plot(times, X_out[:, 0], label="X (0)")
-    # plt.plot(times, X_out[:, 1], label="X (1)")
-    # plt.plot(times, X_out[:, 2], label="X (2)")
-    # plt.plot(times, X_out[:, 3], label="X (3)")
-    # plt.plot(times, X_out[:, 4], label="X (4)")
-    # plt.plot(times, X_out[:, 5], label="X (5)")
-    # plt.plot(times, X_out[:, 6], label="X (6)")
-    # plt.plot(times, X_out[:, 7], label="X (7)")
-    # plt.legend(loc=0)
-    # plt.xlabel("Time (MTU)")
-    # plt.ylabel("X Values")
-    # plt.show()
-    #
-    # plt.figure(figsize=(10, 5))
-    # plt.plot(times, Y_out[:, 0], label="Y (0)")
-    # plt.plot(times, Y_out[:, 1], label="Y (1)")
-    # plt.plot(times, Y_out[:, 2], label="Y (2)")
-    # plt.plot(times, Y_out[:, 3], label="Y (3)")
-    # plt.plot(times, Y_out[:, 4], label="Y (4)")
-    # plt.plot(times, Y_out[:, 5], label="Y (5)")
-    # plt.plot(times, Y_out[:, 6], label="Y (6)")
-    # plt.plot(times, Y_out[:, 7], label="Y (7)")
-    # plt.legend(loc=0)
-    # plt.xlabel("Time (MTU)")
-    # plt.ylabel("Y Values")
-    # plt.show()
-    #
-
-    # return X_out, Y_out, times
-    # return data_out
-    return  synth_data, noisy_synth_data
+    return synth_data, noisy_synth_data
 
 
 if __name__ == "__main__":
     synth_data, noisy_synth_data = main()
-    # X_out, Y_out, times = main()
-
-
-
-
-
-
-    # data_out = mean()
-    # data.to_csv('test.csv')
-    # vec_average = np.array(time_average)
-    # mtu_times = np.arange(30) + 1
-    # plt.figure(figsize=(10, 5))
-    # plt.plot(mtu_times, vec_average[:, 1], label="X (1)")
-    # plt.plot(mtu_times, vec_average[:, 2], label="X (2)")
-    # plt.plot(mtu_times, vec_average[:, 3], label="X (3)")
-    # plt.plot(mtu_times, vec_average[:, 4], label="X (4)")
-    # plt.plot(mtu_times, vec_average[:, 5], label="X (5)")
-    # plt.plot(mtu_times, vec_average[:, 6], label="X (6)")
-    # plt.plot(mtu_times, vec_average[:, 7], label="X (7)")
-    # plt.plot(mtu_times, vec_average[:, 8], label="X (8)")
-    # plt.legend(loc=0)
-    # plt.xlabel("i-th intervals")
-    # plt.ylabel("X_k Values")
-    # plt.show()
-
-    # vec_average = np.array(time_average)
-    # mtu_times = vec_average[:, 0]
-    # plt.figure(figsize=(10, 5))
-    # plt.plot(mtu_times, vec_average[:, 9], label="Y (1)")
-    # plt.plot(mtu_times, vec_average[:, 10], label="Y (2)")
-    # plt.plot(mtu_times, vec_average[:, 11], label="Y (3)")
-    # plt.plot(mtu_times, vec_average[:, 12], label="Y (4)")
-    # plt.plot(mtu_times, vec_average[:, 13], label="Y (5)")
-    # plt.plot(mtu_times, vec_average[:, 14], label="Y (6)")
-    # plt.plot(mtu_times, vec_average[:, 15], label="Y (7)")
-    # plt.plot(mtu_times, vec_average[:, 16], label="Y (8)")
-    # plt.legend(loc=0)
-    # plt.xlabel("i-th intervals")
-    # plt.ylabel("Average Y_k Values")
-    # plt.show()
-    # plt.plot(times, Y_out[:, 32], label="Y (32)")
-    # plt.plot(times, Y_out[:, 64], label="Y (64)")
-    # plt.plot(times, Y_out[:, 96], label="Y (96)")
-    # plt.plot(times, Y_out[:, 128], label="Y (128)")
-    # plt.plot(times, Y_out[:, 160], label="Y (160)")
-    # plt.plot(times, Y_out[:, 192], label="Y (192)")
-    # plt.plot(times, Y_out[:, 224], label="Y (224)")
-
-    vec_synth = np.array(noisy_synth_data)
-    mtu_times = np.arange(30) + 1
-    plt.figure(figsize=(5, 5))
-    plt.plot(mtu_times, vec_synth[:, 0], label="X (1)")
-    # plt.plot(mtu_times, vec_synth[:, 1], label="X (1)")
-    # plt.plot(mtu_times, vec_synth[:, 2], label="X (1)")
-    # plt.plot(mtu_times, vec_synth[:, 3], label="X (1)")
-    # plt.plot(mtu_times, vec_synth[:, 4], label="X (1)")
-    plt.legend(loc=0)
-    plt.xlabel("i-th intervals")
-    plt.ylabel("X_k Values")
-    plt.show()
-
-    #
-    # plt.hist(noisy_synth_data['X'], bins=25, density=True, alpha=0.6, color='g')
-    # plt.show()
-
-    plt.figure(figsize=(5, 10))
-
