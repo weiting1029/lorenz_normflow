@@ -279,8 +279,9 @@ def eks_fixed_initial(data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, tim
 
             v = theta_prev[j] - delta_t * theta_weighted
             A = delta_t * np.matmul(CTHETA, linalg.inv(sigma_theta)) + np.identity(p)  # dim: (p,p)
-            theta_new[j] = linalg.solve(A, v)
-            print(theta_new[j])
+            random_W = rng.multivariate_normal(np.zeros(p), np.identity(p))
+            theta_new[j] = linalg.solve(A, v) + np.sqrt(2*delta_t)*np.matmul(linalg.sqrtm(CTHETA), random_W)
+            # print(theta_new[j])
 
     return THETA
 
