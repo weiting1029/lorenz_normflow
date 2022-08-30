@@ -14,3 +14,34 @@ plt.legend(loc=0)
 plt.xlabel("i-th Intervals")
 plt.ylabel("Y^2_bar Values")
 plt.show()
+
+h_eks_sample = theta_test[:, 0]
+F_eks_sample = theta_test[:, 1]
+c_eks_sample = np.exp(theta_test[:, 2])
+b_eks_sample = theta_test[:, 3]
+
+plt.figure(figsize=(5, 5))
+plt.scatter(h_eks_sample, F_eks_sample, 'o')
+plt.xlabel('h')
+plt.ylabel('F')
+plt.show()
+
+plt.figure(figsize=(5, 5))
+plt.scatter(h_eks_sample, F_eks_sample, 'o')
+plt.xlabel('h')
+plt.ylabel('F')
+plt.show()
+
+plt.figure(figsize=(5, 5))
+plt.scatter(h_eks_sample, F_eks_sample, 'o')
+plt.xlabel('h')
+plt.ylabel('F')
+plt.show()
+
+
+
+
+
+
+
+

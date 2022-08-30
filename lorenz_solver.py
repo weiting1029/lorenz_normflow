@@ -139,7 +139,7 @@ def gnr_synthetic_data(X_out, Y_out, times, N, L, K):
     df = df.groupby(np.arange(len(df)) // 100).mean()
 
     traject_array = np.array(df)
-    synthetic_array = np.zeros([30, 5])
+    synthetic_array = np.zeros([N, 5])
     synthetic_array[:, 0] = np.mean(traject_array[:, 1:9], axis=1)
     synthetic_array[:, 1] = np.mean(traject_array[:, 9:17], axis=1)
     synthetic_array[:, 2] = np.square(np.mean(traject_array[:, 1:9], axis=1))
@@ -148,11 +148,11 @@ def gnr_synthetic_data(X_out, Y_out, times, N, L, K):
     synthetic_array[:, 4] = np.mean(traject_array[:, 17:25], axis=1)
 
     s_p = np.std(synthetic_array, axis=0)
-    sigma_p = 50 * s_p
-    # sigma_p = 0.1*np.ones(5)
+    sigma_p = 5 * s_p
+    # sigma_p = 0.01*np.ones(5)
     mean = np.zeros(5)
     cov = np.diag(sigma_p ** 2)
-    measurement_noise = rng.multivariate_normal(mean, cov, 30)
+    measurement_noise = rng.multivariate_normal(mean, cov, N)
     noisy_synth = synthetic_array + measurement_noise
 
     synthetic_data = pd.DataFrame(synthetic_array, columns=['X', 'Y_bar', 'X^2', 'X*Y_bar', 'Y_bar^2'])
@@ -161,7 +161,7 @@ def gnr_synthetic_data(X_out, Y_out, times, N, L, K):
     return synthetic_data, noisy_synthetic_data
 
 
-def forward_model_fi(x0, y0, h, F, b, c, time_step, num_steps, burn_in, skip):
+def forward_model_fi(x0, y0, h, F, b, c, time_step, num_steps, burn_in, skip, N):
     K = 8
     L = 32
     X = np.zeros(K)
@@ -186,7 +186,7 @@ def forward_model_fi(x0, y0, h, F, b, c, time_step, num_steps, burn_in, skip):
     df = df.groupby(np.arange(len(df)) // 100).mean()
 
     traject_array = np.array(df)
-    synthetic_array = np.zeros([30, 5])
+    synthetic_array = np.zeros([N, 5])
     synthetic_array[:, 0] = np.mean(traject_array[:, 1:9], axis=1)
     synthetic_array[:, 1] = np.mean(traject_array[:, 9:17], axis=1)
     synthetic_array[:, 2] = np.square(np.mean(traject_array[:, 1:9], axis=1))
@@ -197,16 +197,17 @@ def forward_model_fi(x0, y0, h, F, b, c, time_step, num_steps, burn_in, skip):
     return synthetic_array
 
 
-def parallel_fm_j(x0, y0, time_step, num_steps, burn_in, skip, theta_prev, theta_dm, j):
+def parallel_fm_j(x0, y0, time_step, num_steps, burn_in, skip, theta_prev, theta_dm, N, j):
     CTHETA_j = np.outer(theta_dm[j, :], theta_dm[j, :])  # dim:(p,p)
     h_j = theta_prev[j, 0]
     F_j = theta_prev[j, 1]
-    c_j = np.exp(theta_prev[j, 2])
-    b_j = theta_prev[j, 3]
-    # start_index = j * 30
-    # end_index = (j + 1) * 30
+    # c_j = np.exp(theta_prev[j, 2])
+    # b_j = theta_prev[j, 3]
+    b_j = theta_prev[j, 2]
+    c_j = 10
+
     forward_eva_j = forward_model_fi(x0, y0, h_j, F_j, b_j, c_j, time_step, num_steps,
-                                     burn_in, skip)
+                                     burn_in, skip, N)
 
     return CTHETA_j, forward_eva_j
 
@@ -221,10 +222,12 @@ def prior_initial(m_z0, sigma_z0, L):
     return z0
 
 
-def eks_fixed_initial(data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, time_step, num_steps, burn_in, skip, pool):
+def eks_fixed_initial(data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, time_step, num_steps, burn_in, skip, N,
+                      pool):
     eps = np.finfo(float).eps
     p = m_theta.shape[0]
     theta_0 = prior_theta(m_theta, sigma_theta, J)
+    print(theta_0)
     weight_matrix = linalg.inv(linalg.sqrtm(SIGMA))  ##W = SIGMA^(-1/2)
     data_matrix = np.repeat(data.to_numpy()[None, :], J, axis=0).reshape(-1, 5)
     # theta_prev =
@@ -236,7 +239,7 @@ def eks_fixed_initial(data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, tim
         theta_mean = np.mean(theta_prev, axis=0)
         theta_dm = theta_prev - theta_mean * np.ones(theta_prev.shape)
         CTHETA = np.zeros([p, p])
-        forward_eva = np.zeros([30 * J, 5])
+        forward_eva = np.zeros([N * J, 5])
         # for j in range(J):
         #     CTHETA = CTHETA + np.outer(theta_dm[j, :], theta_dm[j, :])  # dim:(p,p)
         #     h_j = theta_prev[j, 0]
@@ -250,7 +253,7 @@ def eks_fixed_initial(data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, tim
 
         # distance_j = data - forward_eva[start_index:end_index, :]
 
-        parallel_fm = partial(parallel_fm_j, x0, y0, time_step, num_steps, burn_in, skip, theta_prev, theta_dm)
+        parallel_fm = partial(parallel_fm_j, x0, y0, time_step, num_steps, burn_in, skip, theta_prev, theta_dm, N)
         CTHETA_list, forward_eva_list = zip(*pool.map(parallel_fm, [j for j in range(J)]))
         arr_CTHETA = np.array(CTHETA_list)
         arr_forward_eva = np.array(forward_eva_list)
@@ -258,8 +261,8 @@ def eks_fixed_initial(data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, tim
         CTHETA = np.mean(arr_CTHETA, axis=0)
         forward_eva = arr_forward_eva.reshape(-1, 5)
         forward_mean = np.mean(forward_eva, axis=0) * np.ones(forward_eva.shape)  ##?
-        g_demeaned = np.matmul(forward_eva - forward_mean, weight_matrix.T)  # dim: 30J x  5
-        data_dm = np.matmul(forward_eva - data_matrix, weight_matrix.T)  # dim: 30J x 5
+        g_demeaned = np.matmul(forward_eva - forward_mean, weight_matrix.T)  # dim: NJ x  5
+        data_dm = np.matmul(forward_eva - data_matrix, weight_matrix.T)  # dim: NJ x 5
         # norm = np.mean(np.multiply(forward_eva - forward_mean, forward_eva - data_matrix))
         # delta_t = 1/(norm+eps)
         #
@@ -267,21 +270,21 @@ def eks_fixed_initial(data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, tim
         delta_t = 1 / (norm + eps)
 
         for j in range(J):
-            start_index = j * 30
-            end_index = (j + 1) * 30
+            start_index = j * N
+            end_index = (j + 1) * N
             temp_matrix = np.repeat(data_dm[start_index:end_index, :][None, :], J, axis=0).reshape(-1, 5)
-            dot_product = np.sum(np.multiply(g_demeaned, temp_matrix), axis=1)  # (30J,1)
-            vec_product = np.mean(dot_product.reshape(-1, 30), axis=1).reshape(J, )  # (J,1) sum over i
+            dot_product = np.sum(np.multiply(g_demeaned, temp_matrix), axis=1)  # (NJ,1)
+            vec_product = np.mean(dot_product.reshape(-1, N), axis=1).reshape(J, )  # (J,1) sum over i
 
             theta_weighted = np.mean(np.multiply(theta_prev, np.repeat(vec_product, p).reshape(J, p)),
-                                     axis=0)  # dim: (p,1)
+                                     axis=0)  # dim: (p,1) sum over j
             # theta_weighted = (np.matmul(theta_prev.T, vec_product).reshape([p, ]))/J
 
             v = theta_prev[j] - delta_t * theta_weighted
             A = delta_t * np.matmul(CTHETA, linalg.inv(sigma_theta)) + np.identity(p)  # dim: (p,p)
             random_W = rng.multivariate_normal(np.zeros(p), np.identity(p))
-            theta_new[j] = linalg.solve(A, v) + np.sqrt(2*delta_t)*np.matmul(linalg.sqrtm(CTHETA), random_W)
-            # print(theta_new[j])
+            theta_new[j] = linalg.solve(A, v) + np.sqrt(2 * delta_t) * np.matmul(linalg.sqrtm(CTHETA), random_W)
+            print(theta_new[j])
 
     return THETA
 
@@ -314,9 +317,9 @@ def main():
     global rng
     rng = np.random.default_rng(12345)
 
-    T = 100
-    time_step = 0.01  # delta_t
-    num_steps = 360000  # integration_steps 3600/0.001
+    T = 10
+    time_step = 0.001  # delta_t
+    num_steps = 360000  # integration_steps 3600/0.001->1000/0,01
     burn_in = 60000  # 600/0.001
     skip = 100  # 1/0.001
 
@@ -324,7 +327,7 @@ def main():
     burn_in_test = 6000  # 600/0.001
     skip_test = 1000  # 1/0.001
 
-    N = (num_steps - burn_in) / (skip * T)
+    N = int((num_steps - burn_in) / (skip * T))
 
     X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, burn_in, skip)
     # X_out = np.array(pd.read_csv('data/X_out.csv'))[:, 1:]
@@ -332,21 +335,34 @@ def main():
     # times = np.arange(3000)
     # data_out = process_lorenz_data(X_out, times, steps, J, F, dt=time_step, x_skip=1, t_skip=10, u_scale=1)
 
-    synth_data, noisy_synth_data = gnr_synthetic_data(X_out, Y_out, times, N, L, K)
+    synth_data_long, noisy_synth_data_long = gnr_synthetic_data(X_out, Y_out, times, 30, L, K)
 
-    ######## EKS
+    N = 4
+    noisy_synth_data = noisy_synth_data_long[:4]
+    synth_data = synth_data_long[:4]
+    # synth_data_long, noisy_synth_data_long = gnr_synthetic_data(X_out, Y_out, times, N, L, K)
+
+    ######## EKS #######
     pool = mp.Pool(4)
     x0 = 1
     y0 = 0.1
-    m_theta = np.array([0, 10, 2, 5])
-    sigma_theta = np.diag([1, 5, 0.1, 5])
-    SIGMA = np.asarray(noisy_synth_data.cov())
-    max_itr = 60
+    # m_theta = np.array([0, 10, 2, 8]) #(h,F,logc, b)
+    # sigma_theta = np.diag([1, 3, 0.1, 3])
+    m_theta = np.array([0.0, 10.0, 9.0]) #(h,F,logc, b)
+    sigma_theta = np.diag([1.0, 1.0, 2.0])
+
+    SIGMA = np.asarray(noisy_synth_data_long.cov())
+    max_itr = 50
     J = 100
-    #
+
+    T = 10
+    time_step = 0.001  # delta_t
+    num_steps = 100000  # integration_steps 3600/0.001->1000/0,01
+    burn_in = 60000  # 600/0.001
+    skip = 100  # 1/0.001
+
     theta_test = eks_fixed_initial(noisy_synth_data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, time_step,
-                                   num_steps,
-                                   burn_in, skip, pool)
+                                   num_steps, burn_in, skip, N, pool)
     pool.close()
     pool.join()
 
@@ -359,3 +375,8 @@ if __name__ == "__main__":
     synth_data, noisy_synth_data, theta_test = main()
     print(synth_data.describe())
     print(np.mean(theta_test, axis=0))
+    h_eks_sample = theta_test[:, 0]
+    F_eks_sample = theta_test[:, 1]
+    # c_eks_sample = np.exp(theta_test[:, 2])
+    b_eks_sample = theta_test[:, 2]
+
