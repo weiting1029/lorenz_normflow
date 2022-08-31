@@ -338,8 +338,8 @@ def main():
     synth_data_long, noisy_synth_data_long = gnr_synthetic_data(X_out, Y_out, times, 30, L, K)
 
     N = 4
-    noisy_synth_data = noisy_synth_data_long[:4]
-    synth_data = synth_data_long[:4]
+    noisy_synth_data = noisy_synth_data_long[:N]
+    synth_data = synth_data_long[:N]
     # synth_data_long, noisy_synth_data_long = gnr_synthetic_data(X_out, Y_out, times, N, L, K)
 
     ######## EKS #######
@@ -348,11 +348,11 @@ def main():
     y0 = 0.1
     # m_theta = np.array([0, 10, 2, 8]) #(h,F,logc, b)
     # sigma_theta = np.diag([1, 3, 0.1, 3])
-    m_theta = np.array([0.0, 10.0, 9.0]) #(h,F,logc, b)
-    sigma_theta = np.diag([1.0, 1.0, 2.0])
+    m_theta = np.array([0.0, 10.0, 8.0]) #(h,F,logc, b) true = (1, 10, 10)
+    sigma_theta = np.diag([1.0, 5.0, 5.0])
 
     SIGMA = np.asarray(noisy_synth_data_long.cov())
-    max_itr = 50
+    max_itr = 20
     J = 100
 
     T = 10
