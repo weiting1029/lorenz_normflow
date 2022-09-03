@@ -11,7 +11,7 @@ from scipy.stats import multivariate_normal
 import multiprocessing as mp
 import numexpr as ne
 from functools import partial
-from lorenz_solver import l96_truth_step, run_lorenz96_truth, gnr_synthetic_data
+from lorenz_solver import l96_truth_step, run_lorenz96_truth, gnr_synthetic_data, process_lorenz_data
 
 
 #
@@ -32,16 +32,13 @@ from lorenz_solver import l96_truth_step, run_lorenz96_truth, gnr_synthetic_data
 #     # def surrogate_stochastic_model(self, ):
 
 
-def natural_forward_model(K, L, x0, y0, h, F, b, c, time_step, num_steps, burn_in, skip, N):
+def natural_forward_model(K, L, x0, y0, h, F, b, c, time_step, num_steps, burn_in, skip, N, x_skip, t_skip):
     X = np.zeros(K)
     Y = np.zeros(L * K)
     X[0] = x0
     Y[0] = y0
     X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, burn_in, skip)
-
-
-
-    
+    train_data = process_lorenz_data(X_out, L, x_skip, t_skip)
 
     T = X_out.shape[0]
     Y_bar = np.zeros(X_out.shape)
@@ -66,7 +63,10 @@ def natural_forward_model(K, L, x0, y0, h, F, b, c, time_step, num_steps, burn_i
                                         np.mean(traject_array[:, 9:17], axis=1))
     synthetic_array[:, 4] = np.mean(traject_array[:, 17:25], axis=1)
 
-    return synthetic_array
+    return synthetic_array, train_data
+
+
+
 
 
 # def surrogate_forward_model():
@@ -80,15 +80,11 @@ def parallel_nfm_j(K, L, x0, y0, time_step, num_steps, burn_in, skip, theta_samp
     b_j = theta_sample[j, 2]
     c_j = 10
 
-    forward_eva_j = natural_forward_model(K, L, x0, y0, h_j, F_j, b_j, c_j, time_step, num_steps,
+    forward_eva_j, train_data_j = natural_forward_model(K, L, x0, y0, h_j, F_j, b_j, c_j, time_step, num_steps,
                                           burn_in, skip, N)
 
-    # u_matrix =
 
-
-
-
-    return forward_eva_j
+    return forward_eva_j, train_data_j
 
 
 global rng
