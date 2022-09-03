@@ -162,6 +162,93 @@ def gnr_synthetic_data(X_out, Y_out, times, N, L, K):
     return synthetic_data, noisy_synthetic_data
 
 
+@jit(nopython=True, cache=True)
+def l96_forecast_step(X, F=20):
+    """
+    Calculate the tendency of the Lorenz 96 Forecast Model dynamics
+
+    Args:
+        X (ndarray): Array of x values at a given time step
+        F (float): Forcing value
+
+    Returns:
+        dXdt: the time tendency of the Xs
+    """
+    K = X.size
+    dXdt = np.zeros(X.size)
+    for k in range(K):
+        dXdt[k] = -X[k - 1] * (X[k - 2] - X[(k + 1) % K]) - X[k] + F
+    return dXdt
+
+
+
+
+
+
+def process_lorenz_data(X_out, times, steps, J, F, dt, x_skip, t_skip, u_scale):
+    """
+    Sample from Lorenz model output and reformat the data into a format more amenable to machine learning.
+
+
+    Args:
+        X_out (ndarray): Lorenz 96 model output
+        J (int): number of Y variables per X variable
+        x_skip (int): number of X variables to skip when sampling the data
+        t_skip (int): number of time steps to skip when sampling the data
+
+    Returns:
+        combined_data: pandas DataFrame
+    """
+    x_series_list = []
+    #y_series_list = []
+    #y_prev_list = []
+    ux_series_list = []
+    ux_prev_series_list = []
+    u_series_list = []
+    u_prev_series_list = []
+    x_s = np.arange(0, X_out.shape[1], x_skip)
+    t_s = np.arange(2, X_out.shape[0] - 1, t_skip)
+    t_p = t_s - 1
+    time_list = []
+    step_list = []
+    x_list = []
+    K = X_out.shape[1]
+    for k in x_s:
+        x_series_list.append(X_out[t_s, k: k + 1])
+        ux_series_list.append((-X_out[t_s, k - 1] * (X_out[t_s, k - 2] - X_out[t_s, (k + 1) % K]) - X_out[t_s, k] + F) -
+                              (X_out[t_s + 1, k] - X_out[t_s, k]) / dt)
+        ux_prev_series_list.append((-X_out[t_p, k - 1] * (X_out[t_p, k - 2] - X_out[t_p, (k + 1) % K]) - X_out[t_p, k]
+                                    + F) - (X_out[t_s, k] - X_out[t_p, k]) / dt)
+        #y_series_list.append(Y_out[t_s, k * J: (k + 1) * J])
+        #y_prev_list.append(Y_out[t_p, k * J: (k + 1) * J])
+        #u_series_list.append(np.expand_dims(u_scale * Y_out[t_s, k * J: (k+1) * J].sum(axis=1), 1))
+        #u_prev_series_list.append(np.expand_dims(u_scale * Y_out[t_p, k * J: (k+1) * J].sum(axis=1), 1))
+        time_list.append(times[t_s])
+        step_list.append(steps[t_s])
+        x_list.append(np.ones(time_list[-1].size) * k)
+    x_cols = ["X_t"]
+    #y_cols = ["Y_t+1_{0:d}".format(y) for y in range(J)]
+    #y_p_cols = ["Y_t_{0:d}".format(y) for y in range(J)]
+    #u_cols = ["Uy_t", "Uy_t+1", "Ux_t", "Ux_t+1"]
+    u_cols = ["Ux_t", "Ux_t+1"]
+    combined_data = pd.DataFrame(np.vstack(x_series_list), columns=x_cols)
+    combined_data.loc[:, "time"] = np.concatenate(time_list)
+    combined_data.loc[:, "step"] = np.concatenate(step_list)
+    combined_data.loc[:, "x_index"] = np.concatenate(x_list)
+    combined_data.loc[:, "u_scale"] = u_scale
+    combined_data.loc[:, "Ux_t+1"] = np.concatenate(ux_series_list)
+    combined_data.loc[:, "Ux_t"] = np.concatenate(ux_prev_series_list)
+    #combined_data.loc[:, "Uy_t+1"] = np.concatenate(u_series_list)
+    #combined_data.loc[:, "Uy_t"] = np.concatenate(u_prev_series_list)
+    #combined_data = pd.concat([combined_data, pd.DataFrame(np.vstack(y_prev_list), columns=y_p_cols),
+    #                           pd.DataFrame(np.vstack(y_series_list), columns=y_cols)], axis=1)
+    out_cols = ["x_index", "step", "time", "u_scale"] + x_cols + u_cols # + y_p_cols + y_cols
+    return combined_data.loc[:, out_cols]
+
+
+
+
+
 def forward_model_fi(x0, y0, h, F, b, c, time_step, num_steps, burn_in, skip, N):
     K = 8
     L = 32
@@ -325,6 +412,7 @@ ne.set_vml_num_threads(8)
 global rng
 rng = np.random.default_rng(12345)
 
+
 def main():
     K = 8
     L = 32
@@ -336,7 +424,6 @@ def main():
     b = 10.0
     c = 10.0
     F = 10
-
 
     # h_bad = -11.7046948
     # b_bad =  125.31967468
@@ -375,12 +462,12 @@ def main():
     y0 = 0.1
     # m_theta = np.array([0, 10, 2, 8]) #(h,F,logc, b)
     # sigma_theta = np.diag([1, 3, 0.1, 3])
-    m_theta = np.array([0.0, 10.0, 12.0])  # (h,F,logc, b) true = (1, 10, 10)
+    m_theta = np.array([0.0, 10.0, 10.0])  # (h,F,logc, b) true = (1, 10, 10)
     sigma_theta = np.diag([1.0, 5.0, 5.0])
 
     SIGMA = np.asarray(noisy_synth_data_long.cov())
     max_itr = 20
-    J = 50
+    J = 20
 
     T = 10
     time_step = 0.001  # delta_t
@@ -394,7 +481,7 @@ def main():
     pool.close()
     pool.join()
 
-    # theta_test = 0
+    theta_test = 0
 
     return synth_data, noisy_synth_data, theta_test
 
@@ -402,8 +489,8 @@ def main():
 if __name__ == "__main__":
     synth_data, noisy_synth_data, theta_test = main()
     print(synth_data.describe())
-    print(np.mean(theta_test, axis=0))
-    h_eks_sample = theta_test[:, 0]
-    F_eks_sample = theta_test[:, 1]
-    # c_eks_sample = np.exp(theta_test[:, 2])
-    b_eks_sample = theta_test[:, 2]
+    # print(np.mean(theta_test, axis=0))
+    # h_eks_sample = theta_test[:, 0]
+    # F_eks_sample = theta_test[:, 1]
+    # # c_eks_sample = np.exp(theta_test[:, 2])
+    # b_eks_sample = theta_test[:, 2]
