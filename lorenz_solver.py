@@ -185,7 +185,7 @@ def l96_forecast_step(X, F=20):
 
 
 
-def process_lorenz_data(X_out, times, steps, J, F, dt, x_skip, t_skip, u_scale):
+def process_lorenz_data(X_out, L,  x_skip, t_skip):
     """
     Sample from Lorenz model output and reformat the data into a format more amenable to machine learning.
 
