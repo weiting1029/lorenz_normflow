@@ -61,6 +61,8 @@ def run_lorenz96_truth(x_initial, y_initial, h, f, b, c, time_step, num_steps, b
     Returns:
         X_out [number of timesteps, X size]: X values at each time step,
         Y_out [number of timesteps, Y size]: Y values at each time step
+        times: array of times in MTU values
+        steps: array of i-th steps
     """
     archive_steps = (num_steps - burn_in) // skip  ##number of steps to be saved
     x_out = np.zeros((archive_steps, x_initial.size))
@@ -162,6 +164,53 @@ def gnr_synthetic_data(X_out, Y_out, times, N, L, K):
     return synthetic_data, noisy_synthetic_data
 
 
+def prepare_train_data(X_out, Y_out, L, times, steps, F, dt, x_skip, t_skip, u_scale):
+    Y_square = np.square(Y_out)
+    x_series_list = []
+    u_series_list = []
+    u_prev_series_list = []
+    v_series_list = []
+    v_prev_series_list = []
+
+    x_s = np.arange(0, X_out.shape[1], x_skip)
+    t_s = np.arange(1, X_out.shape[0]-1, t_skip)
+    t_p = t_s - 1
+    time_list = []
+    step_list = []
+    x_list = []
+    K = X_out.shape[1]
+
+    for k in x_s:
+        x_series_list.append(X_out[t_s, k: k + 1])
+        u_series_list.append((-X_out[t_s, k - 1] * (X_out[t_s, k - 2] - X_out[t_s, (k + 1) % K]) - X_out[t_s, k] + F) -
+                             (X_out[t_s + 1, k] - X_out[t_s, k]) / dt)
+        u_prev_series_list.append((-X_out[t_p, k - 1] * (X_out[t_p, k - 2] - X_out[t_p, (k + 1) % K]) - X_out[t_p, k]
+                                   + F) - (X_out[t_s, k] - X_out[t_p, k]) / dt)
+
+        v_series_list.append(np.expand_dims(u_scale * Y_square[t_s, k * L: (k + 1) * L].sum(axis=1), 1))
+        v_prev_series_list.append(np.expand_dims(u_scale * Y_square[t_p, k * L: (k + 1) * L].sum(axis=1), 1))
+
+        time_list.append(times[t_s])
+        step_list.append(steps[t_s])
+        x_list.append(np.ones(time_list[-1].size) * k)
+
+    x_cols = ["X_t"]
+    u_cols = ["U_t", "U_t+1"]
+    v_cols = ["V_t", "V_t+1"]
+    combined_data = pd.DataFrame(np.vstack(x_series_list), columns=x_cols)
+    combined_data.loc[:, "time"] = np.concatenate(time_list)
+    combined_data.loc[:, "step"] = np.concatenate(step_list)
+    combined_data.loc[:, "x_index"] = np.concatenate(x_list)
+    combined_data.loc[:, "u_scale"] = u_scale
+    combined_data.loc[:, "U_t+1"] = np.concatenate(u_series_list)
+    combined_data.loc[:, "U_t"] = np.concatenate(u_prev_series_list)
+    combined_data.loc[:, "V_t+1"] = np.concatenate(v_series_list)
+    combined_data.loc[:, "V_t"] = np.concatenate(v_prev_series_list)
+
+    out_cols = ["x_index", "step", "time", "u_scale"] + x_cols + u_cols + v_cols
+    return combined_data.loc[:, out_cols]
+
+
 @jit(nopython=True, cache=True)
 def l96_forecast_step(X, F=20):
     """
@@ -181,18 +230,14 @@ def l96_forecast_step(X, F=20):
     return dXdt
 
 
-
-
-
-
-def process_lorenz_data(X_out, L,  x_skip, t_skip):
+def process_lorenz_data(X_out, times, steps, L, F, dt, x_skip, t_skip, u_scale):
     """
     Sample from Lorenz model output and reformat the data into a format more amenable to machine learning.
 
 
     Args:
         X_out (ndarray): Lorenz 96 model output
-        J (int): number of Y variables per X variable
+        L (int): number of Y variables per X variable
         x_skip (int): number of X variables to skip when sampling the data
         t_skip (int): number of time steps to skip when sampling the data
 
@@ -200,14 +245,14 @@ def process_lorenz_data(X_out, L,  x_skip, t_skip):
         combined_data: pandas DataFrame
     """
     x_series_list = []
-    #y_series_list = []
-    #y_prev_list = []
+    # y_series_list = []
+    # y_prev_list = []
     ux_series_list = []
     ux_prev_series_list = []
     u_series_list = []
     u_prev_series_list = []
     x_s = np.arange(0, X_out.shape[1], x_skip)
-    t_s = np.arange(2, X_out.shape[0] - 1, t_skip)
+    t_s = np.arange(1, X_out.shape[0] , t_skip)
     t_p = t_s - 1
     time_list = []
     step_list = []
@@ -219,17 +264,17 @@ def process_lorenz_data(X_out, L,  x_skip, t_skip):
                               (X_out[t_s + 1, k] - X_out[t_s, k]) / dt)
         ux_prev_series_list.append((-X_out[t_p, k - 1] * (X_out[t_p, k - 2] - X_out[t_p, (k + 1) % K]) - X_out[t_p, k]
                                     + F) - (X_out[t_s, k] - X_out[t_p, k]) / dt)
-        #y_series_list.append(Y_out[t_s, k * J: (k + 1) * J])
-        #y_prev_list.append(Y_out[t_p, k * J: (k + 1) * J])
-        #u_series_list.append(np.expand_dims(u_scale * Y_out[t_s, k * J: (k+1) * J].sum(axis=1), 1))
-        #u_prev_series_list.append(np.expand_dims(u_scale * Y_out[t_p, k * J: (k+1) * J].sum(axis=1), 1))
+        # y_series_list.append(Y_out[t_s, k * J: (k + 1) * J])
+        # y_prev_list.append(Y_out[t_p, k * J: (k + 1) * J])
+        # u_series_list.append(np.expand_dims(u_scale * Y_out[t_s, k * J: (k+1) * J].sum(axis=1), 1))
+        # u_prev_series_list.append(np.expand_dims(u_scale * Y_out[t_p, k * J: (k+1) * J].sum(axis=1), 1))
         time_list.append(times[t_s])
         step_list.append(steps[t_s])
         x_list.append(np.ones(time_list[-1].size) * k)
     x_cols = ["X_t"]
-    #y_cols = ["Y_t+1_{0:d}".format(y) for y in range(J)]
-    #y_p_cols = ["Y_t_{0:d}".format(y) for y in range(J)]
-    #u_cols = ["Uy_t", "Uy_t+1", "Ux_t", "Ux_t+1"]
+    # y_cols = ["Y_t+1_{0:d}".format(y) for y in range(J)]
+    # y_p_cols = ["Y_t_{0:d}".format(y) for y in range(J)]
+    # u_cols = ["Uy_t", "Uy_t+1", "Ux_t", "Ux_t+1"]
     u_cols = ["Ux_t", "Ux_t+1"]
     combined_data = pd.DataFrame(np.vstack(x_series_list), columns=x_cols)
     combined_data.loc[:, "time"] = np.concatenate(time_list)
@@ -238,15 +283,12 @@ def process_lorenz_data(X_out, L,  x_skip, t_skip):
     combined_data.loc[:, "u_scale"] = u_scale
     combined_data.loc[:, "Ux_t+1"] = np.concatenate(ux_series_list)
     combined_data.loc[:, "Ux_t"] = np.concatenate(ux_prev_series_list)
-    #combined_data.loc[:, "Uy_t+1"] = np.concatenate(u_series_list)
-    #combined_data.loc[:, "Uy_t"] = np.concatenate(u_prev_series_list)
-    #combined_data = pd.concat([combined_data, pd.DataFrame(np.vstack(y_prev_list), columns=y_p_cols),
+    # combined_data.loc[:, "Uy_t+1"] = np.concatenate(u_series_list)
+    # combined_data.loc[:, "Uy_t"] = np.concatenate(u_prev_series_list)
+    # combined_data = pd.concat([combined_data, pd.DataFrame(np.vstack(y_prev_list), columns=y_p_cols),
     #                           pd.DataFrame(np.vstack(y_series_list), columns=y_cols)], axis=1)
-    out_cols = ["x_index", "step", "time", "u_scale"] + x_cols + u_cols # + y_p_cols + y_cols
+    out_cols = ["x_index", "step", "time", "u_scale"] + x_cols + u_cols  # + y_p_cols + y_cols
     return combined_data.loc[:, out_cols]
-
-
-
 
 
 def forward_model_fi(x0, y0, h, F, b, c, time_step, num_steps, burn_in, skip, N):
@@ -419,35 +461,40 @@ def main():
     X = np.zeros(K)
     Y = np.zeros(L * K)
     X[0] = 1
-    Y[0] = 0.1
+    Y[0] = 1
     h = 1.0
     b = 10.0
     c = 10.0
     F = 10
 
-    # h_bad = -11.7046948
-    # b_bad =  125.31967468
-    # F_bad = 33.71749872
 
     T = 10
     time_step = 0.001  # delta_t
     num_steps = 360000  # integration_steps 3600/0.001->1000/0,01
     burn_in = 60000  # 600/0.001
-    skip = 100  # 1/0.001
+    skip = 5 # 1/0.001
 
-    num_steps_test = 36000  # integration_steps 3600/0.001
-    burn_in_test = 6000  # 600/0.001
-    skip_test = 1000  # 1/0.001
+    # num_steps_test = 36000  # integration_steps 3600/0.001
+    # burn_in_test = 6000  # 600/0.001
+    # skip_test = 1000  # 1/0.001
 
     N = int((num_steps - burn_in) / (skip * T))
 
-    # X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h_bad, F_bad, b_bad, c, time_step, num_steps, burn_in, skip)
+    # X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h_bad, F_bad, b_bad, c, time_step, num_steps, burn_in, skip
 
     X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, burn_in, skip)
     # X_out = np.array(pd.read_csv('data/X_out.csv'))[:, 1:]
     # Y_out = np.array(pd.read_csv('data/Y_out.csv'))[:, 1:]
     # times = np.arange(3000)
     # data_out = process_lorenz_data(X_out, times, steps, J, F, dt=time_step, x_skip=1, t_skip=10, u_scale=1)
+
+    dt = 0.005
+    x_skip = 1
+    t_skip = 1
+    u_scale = h*c/b
+
+    train_data = prepare_train_data(X_out, Y_out, L, times, steps, F, dt, x_skip, t_skip, u_scale)
+    train_data.to_csv('data/test_data.csv')
 
     synth_data_long, noisy_synth_data_long = gnr_synthetic_data(X_out, Y_out, times, 30, L, K)
 

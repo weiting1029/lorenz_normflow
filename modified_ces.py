@@ -38,7 +38,6 @@ def natural_forward_model(K, L, x0, y0, h, F, b, c, time_step, num_steps, burn_i
     X[0] = x0
     Y[0] = y0
     X_out, Y_out, times, steps = run_lorenz96_truth(X, Y, h, F, b, c, time_step, num_steps, burn_in, skip)
-    train_data = process_lorenz_data(X_out, L, x_skip, t_skip)
 
     T = X_out.shape[0]
     Y_bar = np.zeros(X_out.shape)
@@ -63,7 +62,7 @@ def natural_forward_model(K, L, x0, y0, h, F, b, c, time_step, num_steps, burn_i
                                         np.mean(traject_array[:, 9:17], axis=1))
     synthetic_array[:, 4] = np.mean(traject_array[:, 17:25], axis=1)
 
-    return synthetic_array, train_data
+    return synthetic_array
 
 
 
