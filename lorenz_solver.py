@@ -122,7 +122,7 @@ def gnr_synthetic_data(X_out, Y_out, times, N, L, K):
     :param Y_out: trajectories of small-scale variables Y_l,k
     :param times: in MTU times
     :param N: number of realizations
-    :param J: number of fast variables
+    :param L: number of fast variables
     :param K: number of slow variables
     :return: synthetic noisy data for inversions
     """
@@ -138,7 +138,7 @@ def gnr_synthetic_data(X_out, Y_out, times, N, L, K):
     big_array = np.concatenate((np.reshape(times, (T, 1)), X_out, Y_bar, Y_square_bar), axis=1)
 
     df = pd.DataFrame(big_array)
-    df = df.groupby(np.arange(len(df)) // 100).mean()
+    # df = df.groupby(np.arange(len(df)) // 100).mean()
 
     traject_array = np.array(df)
     synthetic_array = np.zeros([N, 5])
@@ -468,10 +468,10 @@ def main():
     F = 10
 
 
-    T = 10
+    T = 1
     time_step = 0.001  # delta_t
-    num_steps = 360000  # integration_steps 3600/0.001->1000/0,01
-    burn_in = 60000  # 600/0.001
+    num_steps = 100000  # integration_steps 3600/0.001->1000/0,01
+    burn_in = 2000  # 600/0.001
     skip = 5 # 1/0.001
 
     # num_steps_test = 36000  # integration_steps 3600/0.001
@@ -496,15 +496,14 @@ def main():
     train_data = prepare_train_data(X_out, Y_out, L, times, steps, F, dt, x_skip, t_skip, u_scale)
     train_data.to_csv('data/test_data.csv')
 
-    synth_data_long, noisy_synth_data_long = gnr_synthetic_data(X_out, Y_out, times, 30, L, K)
+    synth_data_long, noisy_synth_data_long = gnr_synthetic_data(X_out, Y_out, times, N, L, K)
 
-    N = 2
-    noisy_synth_data = noisy_synth_data_long[:N]
-    synth_data = synth_data_long[:N]
+    # noisy_synth_data = noisy_synth_data_long[:N]
+    # synth_data = synth_data_long[:N]
     # synth_data_long, noisy_synth_data_long = gnr_synthetic_data(X_out, Y_out, times, N, L, K)
 
     ######## EKS #######
-    pool = mp.Pool(4)
+    # pool = mp.Pool(4)
     x0 = 1
     y0 = 0.1
     # m_theta = np.array([0, 10, 2, 8]) #(h,F,logc, b)
@@ -516,26 +515,27 @@ def main():
     max_itr = 20
     J = 20
 
-    T = 10
-    time_step = 0.001  # delta_t
-    num_steps = 80000  # integration_steps 3600/0.001->1000/0,01
-    burn_in = 60000  # 600/0.001
-    skip = 100  # 1/0.001
+    # T = 10
+    # time_step = 0.001  # delta_t
+    # num_steps = 80000  # integration_steps 3600/0.001->1000/0,01
+    # burn_in = 60000  # 600/0.001
+    # skip = 100  # 1/0.001
 
-    theta_test = eks_fixed_initial(noisy_synth_data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, time_step,
-                                   num_steps, burn_in, skip, N, pool)
+    # theta_test = eks_fixed_initial(noisy_synth_data, max_itr, J, x0, y0, m_theta, sigma_theta, SIGMA, time_step,
+    #                                num_steps, burn_in, skip, N, pool)
 
-    pool.close()
-    pool.join()
+    # pool.close()
+    # pool.join()
 
     theta_test = 0
 
-    return synth_data, noisy_synth_data, theta_test
+    return synth_data_long, noisy_synth_data_long, theta_test, train_data
 
 
 if __name__ == "__main__":
-    synth_data, noisy_synth_data, theta_test = main()
-    print(synth_data.describe())
+    synth_data_long, noisy_synth_data_long, theta_test, train_data = main()
+    print(synth_data_long.describe())
+    print(noisy_synth_data_long.describe())
     # print(np.mean(theta_test, axis=0))
     # h_eks_sample = theta_test[:, 0]
     # F_eks_sample = theta_test[:, 1]
